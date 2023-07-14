@@ -1,67 +1,110 @@
-import warnings
-warnings.filterwarnings("ignore")
+# Import Libraries
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import env
+import warnings
+warnings.filterwarnings("ignore")
 
+# Acquire
 from env import host, user, password
 
-# Read data from the zillow table in the zillow database on our mySQL server.
-
+# Create a function that retrieves the necessary connection URL.
 def get_connection(db_name):
-    
     '''
     This function uses my info from my env file to
-    create a connection url to access the Codeup db.
+    create a connection URL to access the Codeup db.
     '''
-    
     return f'mysql+pymysql://{user}:{password}@{host}/{db_name}'
 
+# Create function to retrieve zillow data
 def get_zillow_data():
-    filename = "zillow.csv"
+    '''
+    This function reads in the Zillow data from the Codeup db
+    and returns a pandas DataFrame with all columns.
+    '''
+    filename = 'zillow.csv'
 
+    # Verify if file exists
     if os.path.isfile(filename):
         return pd.read_csv(filename)
+    # Search database if file doesn't exist
     else:
-
-        # Read the SQL query into a dataframe
-        df = pd.read_sql('SELECT bedroomcnt, bathroomcnt, calculatedfinishedsquarefeet, taxvaluedollarcnt, yearbuilt, taxamount, fips FROM properties_2017 WHERE propertylandusetypeid = 261',get_connection('zillow')) 
-
-        
+        sql = '''
+            SELECT bedroomcnt, bathroomcnt, calculatedfinishedsquarefeet,taxvaluedollarcnt,fips
+            FROM properties_2017
+            JOIN predictions_2017 USING (parcelid) 
+            JOIN propertylandusetype USING (propertylandusetypeid)
+            WHERE propertylandusetypeid = 261 AND transactiondate LIKE '2017%%';
+            '''
+        df = pd.read_sql(sql, get_connection('zillow'))
         df.to_csv(filename, index=False)
-
-        # Return the dataframe to the calling code
         return df
-    
 
-def wrangle_zillow():
+def prep_zillow_data(df):
     '''
-    Read zillow data into a pandas DataFrame from mySQL,
-    drop columns not needed for analysis, replace whitespaces with NaN values,
-    drop any rows with Null values, convert all columns to int64,
-    return cleaned zillow DataFrame.
+    This function takes in the DataFrame from get_zillow_data
+    and returns the DataFrame with preprocessing applied.
     '''
+    # Drop null values
+    df = df.dropna()
 
-    # Acquire data
+    # Rename columns
+    df = df.rename(columns={
+        'bedroomcnt': 'bedroom',
+        'bathroomcnt': 'bathroom',
+        'calculatedfinishedsquarefeet': 'sqft',
+        'taxvaluedollarcnt': 'home_value',
+        'fips': 'county'
+    })
 
-    zillow = get_zillow_data()
 
-    # Replace white space values with NaN values.
-    zillow = zillow.replace(r'^\s*$', np.nan, regex=True)
+    # Change the dtype for the necessary columns
+    df['sqft'] = df.sqft.astype(int)
+    df['county'] = df.county.astype(int).astype(str)
 
-    # Drop any rows with NaN values.
-    df = zillow.dropna()
-    
-    # Drop Unnamed: 0 column
-    df = df.drop(columns = 'Unnamed: 0')
+    # Replace the values for readability
+    df = df.replace({'6037': 'Los Angeles', '6059': 'Orange', '6111': 'Ventura'})
+
+    # Calculate IQR for removing outliers
+    q3_bath, q1_bath = np.percentile(df.bathroom, [75, 25])
+    iqr_bath = q3_bath - q1_bath
+
+    q3_bed, q1_bed = np.percentile(df.bedroom, [75, 25])
+    iqr_bed = q3_bed - q1_bed
+
+    q3_sqft, q1_sqft = np.percentile(df.sqft, [75, 25])
+    iqr_sqft = q3_sqft - q1_sqft
+
+    q3_val, q1_val = np.percentile(df.home_value, [75, 25])
+    iqr_val = q3_val - q1_val
+
+    # Get rid of outliers
+    # The 1.5 multiplied by the IQR is a standard deviation of 1.5. For a Poisson distribution, the standard deviation
+    # equals the square root of the mean.
+    df = df[~((df['bathroom'] < (q1_bath - 1.5 * iqr_bath)) | (df['bathroom'] > (q3_bath + 1.5 * iqr_bath)))]
+    df = df[~((df['bedroom'] < (q1_bed - 1.5 * iqr_bed)) | (df['bedroom'] > (q3_bed + 1.5 * iqr_bed)))]
+    df = df[~((df['sqft'] < (q1_sqft - 1.5 * iqr_sqft)) | (df['sqft'] > (q3_sqft + 1.5 * iqr_sqft)))]
+    df = df[~((df['home_value'] < (q1_val - 1.5 * iqr_val)) | (df['home_value'] > (q3_val + 1.5 * iqr_val)))]
 
     return df
 
+def split_data(df):
+    '''
+    This function takes in a DataFrame and returns train, validate, and test DataFrames.
+    '''
+    # Create train_validate and test datasets
+    train_validate, test = train_test_split(df, test_size=.2, random_state=123, stratify=df.churn)
+
+    # Split train_validate into train and validate datasets
+    train, validate = train_test_split(train_validate, test_size=.3, random_state=123, stratify=train_validate.churn)
+
+    return train, validate, test
+
 def min_max_scaler(X_train, X_validate, X_test):
-    """
+    '''
     Scale the features in X_train, X_validate, and X_test using MinMaxScaler.
 
     Args:
@@ -74,7 +117,7 @@ def min_max_scaler(X_train, X_validate, X_test):
         X_train_scaled (DataFrame): The scaled training data.
         X_validate_scaled (DataFrame): The scaled validation data.
         X_test_scaled (DataFrame): The scaled test data.
-    """
+    '''
 
     scaler = MinMaxScaler()
     scaler.fit(X_train)
