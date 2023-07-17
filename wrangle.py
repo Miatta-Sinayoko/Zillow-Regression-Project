@@ -8,8 +8,12 @@ import env
 import warnings
 warnings.filterwarnings("ignore")
 
+from sklearn.model_selection import train_test_split
+import sklearn.preprocessing
+
 # Acquire
 from env import host, user, password
+##############################################   ACQUIRE     ##############################################
 
 # Create a function that retrieves the necessary connection URL.
 def get_connection(db_name):
@@ -42,6 +46,7 @@ def get_zillow_data():
         df = pd.read_sql(sql, get_connection('zillow'))
         df.to_csv(filename, index=False)
         return df
+##############################################   CLEAN     ##############################################
 
 def prep_zillow_data(df):
     '''
@@ -61,11 +66,11 @@ def prep_zillow_data(df):
     })
 
 
-    # Change the dtype for the necessary columns
+    # Change dtype for columns needed
     df['sqft'] = df.sqft.astype(int)
     df['county'] = df.county.astype(int).astype(str)
 
-    # Replace the values for readability
+    # Replace fips with county names streamlining
     df = df.replace({'6037': 'Los Angeles', '6059': 'Orange', '6111': 'Ventura'})
 
     # Calculate IQR for removing outliers
@@ -90,40 +95,81 @@ def prep_zillow_data(df):
     df = df[~((df['home_value'] < (q1_val - 1.5 * iqr_val)) | (df['home_value'] > (q3_val + 1.5 * iqr_val)))]
 
     return df
+##############################################   SPLIT     ##############################################
 
 def split_data(df):
     '''
-    This function takes in a DataFrame and returns train, validate, and test DataFrames.
+    This function splits the clean zillow data 
     '''
+    
     # Create train_validate and test datasets
-    train_validate, test = train_test_split(df, test_size=.2, random_state=123, stratify=df.churn)
-
+    train_validate, test = train_test_split(df, test_size=.2, random_state=123)
+    
     # Split train_validate into train and validate datasets
-    train, validate = train_test_split(train_validate, test_size=.3, random_state=123, stratify=train_validate.churn)
+    train, validate = train_test_split(train_validate, test_size=.25, random_state=123)
 
     return train, validate, test
 
-def min_max_scaler(X_train, X_validate, X_test):
+##############################################  SCALE DATA    ##############################################
+
+def scaled_zillow(train, validate, test):
     '''
-    Scale the features in X_train, X_validate, and X_test using MinMaxScaler.
+    Scale the features in train, validate, and test using MinMaxScaler.
 
     Args:
-        X_train (DataFrame): The training data.
-        X_validate (DataFrame): The validation data.
-        X_test (DataFrame): The test data.
+        train (DataFrame): The training data.
+        validate (DataFrame): The validation data.
+        test (DataFrame): The test data.
 
     Returns:
         scaler (object): The MinMaxScaler object.
-        X_train_scaled (DataFrame): The scaled training data.
-        X_validate_scaled (DataFrame): The scaled validation data.
-        X_test_scaled (DataFrame): The scaled test data.
+        train_scaled (DataFrame): The scaled training data.
+        validate_scaled (DataFrame): The scaled validation data.
+        test_scaled (DataFrame): The scaled test data.
     '''
 
-    scaler = MinMaxScaler()
-    scaler.fit(X_train)
+    scaler = sklearn.preprocessing.MinMaxScaler()
+    scaler.fit(train)
+# scale
+    train_scaled = pd.DataFrame( scaler.transform(train))
+    validate_scaled = pd.DataFrame( scaler.transform(validate))
+    test_scaled = spd.DataFrame( scaler.transform(test))
 
-    X_train_scaled = scaler.transform(X_train)
-    X_validate_scaled = scaler.transform(X_validate)
-    X_test_scaled = scaler.transform(X_test)
+    train_scaled = train_scaled.rename(columns={0:'bathroom', 1:'bedroom', 2:'sqft', 3: 'home_value'})
+    validate_scaled = validate_scaled.rename(columns={0:'bathroom', 1:'bedroom', 2:'sqft', 3:'home_value'})
+    test_scaled = test_scaled.rename(columns={0:'bathroom', 1:'bedroom', 2:'sqft', 3: 'home_value'})
+    
+    return train_scaled, validate_scaled, test_scaled
 
-    return X_train_scaled, X_validate_scaled, X_test_scaled
+##############################################   WRANGLE     ##############################################
+def wrangle_zillow():
+    '''This function acquires, cleans, and splits the zillow data.'''
+    
+    df = prep_zillow_data(get_zillow_data())
+
+    train, validate, test = split_zillow(df)
+
+    return train, validate, test
+##############################################  MODEL SPLIT    ##############################################
+def model_split(train, validate, test):
+    '''This function splits the train, validate, test datasets from the target variable to prepare it for model.'''
+
+    #train_validate, test = train_test_split(df, test_size = .2, random_state=311)
+
+   #train, validate = train_test_split(train_validate, test_size = .25, random_state=311)
+                                              
+
+
+    X_train = train.drop(columns=['home_value', 'county'])
+
+    y_train = train.home_value
+
+    X_validate = validate.drop(columns=['home_value', 'county'])
+
+    y_validate = validate.home_value
+
+    X_test = test.drop(columns=['home_value', 'county'])
+
+    y_test = test.home_value
+
+    return X_train, y_train, X_validate, y_validate, X_test, y_test
