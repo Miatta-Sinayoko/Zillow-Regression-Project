@@ -61,3 +61,14 @@ Note: The "Home Value" feature represents the target variable, while "County" is
 
 ## Recommendations
 - Continue refining and improving the predictive model to enhance the accuracy and reliability of home value predictions.
+
+## Sources
+Absolutely, here's an example of how you might compile the sources for these two projects on a source page:
+
+---
+
+### Sources
+
+1. Carter, A. (2023). Regression Project. GitHub. Retrieved from https://github.com/annie-carter/regression_project
+
+2. Warren, E. (2023). Regression Project. GitHub. Retrieved from https://github.com/elizabethswarren/regression_project
